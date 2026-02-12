@@ -152,13 +152,13 @@ class SQLiteIndex(BaseIndex):
         self.read_connection = connections[router.db_for_read(IndexEntry)]
         self.write_connection = connections[router.db_for_write(IndexEntry)]
 
-        if (
-            self.read_connection.vendor != "sqlite"
-            or self.write_connection.vendor != "sqlite"
-        ):
-            raise NotSupportedError(
-                "You must select a SQLite database to use the SQLite search backend."
-            )
+        #if (
+        #    self.read_connection.vendor != "sqlite"
+        #    or self.write_connection.vendor != "sqlite"
+        #):
+        #    raise NotSupportedError(
+        #       "You must select a SQLite database to use the SQLite search backend."
+        #    )
 
         self.entries = IndexEntry._default_manager.all()
 
@@ -525,7 +525,7 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
         expr = MatchExpression(self.fields or self.FTS_TABLE_FIELDS, search_query)
         # Perform the FTS search. We'll get entries in the SQLiteFTSIndexEntry model.
         objs = (
-            SQLiteFTSIndexEntry.objects.filter(expr)
+            SQLiteFTSIndexEntry.objects.using(self.backend.target_db).filter(expr)
             .select_related("index_entry")
             .filter(
                 index_entry__content_type__in=get_descendants_content_types_pks(
