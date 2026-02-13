@@ -15,6 +15,11 @@ def main():
         required=True,
         help="Specify the search backend (db, elasticsearch7, elasticsearch8, elasticsearch9, opensearch2, opensearch3).",
     )
+    parser.add_argument(
+        "--test",
+        default=None,
+        help="Specific test to run (e.g., modelsearch.tests.test_sqlite_backend.TestSQLiteSearchBackend.test_ranking)",
+    )
 
     args = parser.parse_args()
 
@@ -23,7 +28,10 @@ def main():
 
     django.setup()
 
-    call_command("test")
+    if args.test:
+        call_command("test", args.test)
+    else:
+        call_command("test")
 
 
 if __name__ == "__main__":

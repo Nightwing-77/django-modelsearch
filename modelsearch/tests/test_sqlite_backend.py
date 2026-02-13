@@ -50,10 +50,12 @@ class TestSQLiteSearchBackend(BackendTests, TestCase):
     @skip("The SQLite backend doesn't support searching on specified fields.")
     def test_autocomplete_with_fields_arg(self):
         return super().test_autocomplete_with_fields_arg()
-
-    @skip("The SQLite backend doesn't guarantee correct ranking of results.")
+    
     def test_ranking(self):
         return super().test_ranking()
+
+    def test_ranking_reverse(self):
+        return super().test_ranking_reverse()
 
     # TODO: figure out why this really fails ("'Not' object has no attribute 'as_sql'")
     @unittest.skip(

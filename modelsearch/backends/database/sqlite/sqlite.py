@@ -12,9 +12,9 @@ from django.db.models.constants import LOOKUP_SEP
 from django.db.models.functions import Cast, Length
 from django.utils.encoding import force_str
 from django.utils.functional import cached_property
-
+from django.db.models import Case, When
 from modelsearch.conf import get_app_config
-
+from django.db import models
 from ....index import AutocompleteField, RelatedFields, SearchField, get_indexed_models
 from ....query import And, MatchAll, Not, Or, Phrase, PlainText
 from ....utils import (
@@ -439,11 +439,12 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
 
     def build_tsrank(self, vector, query, config=None, boost=1.0):
         if isinstance(query, (Phrase, PlainText, Not)):
-            rank_expression = BM25()
-
-            if boost != 1.0:
-                rank_expression *= boost
-
+            # Exact weights for FTS5 columns: [index_entry_id, title, body, autocomplete]
+            #switching from boosting to weights 
+            # We boost title (1000.0) and body (100.0)
+            weights = [0.0, 1000.0, 100.0, 1.0]
+            rank_expression = BM25(*weights)
+    
             return rank_expression
 
         elif isinstance(query, And):
@@ -476,17 +477,9 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
 
     def _build_rank_expression(self, vectors, config):
         # TODO: Come up with my own expression class that compiles down to bm25
+        # We can't multiply BM25 by F() objects, so just return BM25 directly
+        return self.build_tsrank(vectors[0][0], self.query, config=config)
 
-        rank_expressions = [
-            self.build_tsrank(vector, self.query, config=config) * boost
-            for vector, boost in vectors
-        ]
-
-        rank_expression = rank_expressions[0]
-        for other_rank_expression in rank_expressions[1:]:
-            rank_expression += other_rank_expression
-
-        return rank_expression
 
     def search(self, config, start, stop, score_field=None):
         normalized_query = normalize(self.query)
@@ -533,17 +526,27 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
                 )
             )
         )
-
+        objs = objs.annotate(_score=rank_expression)
         if self.order_by_relevance:
-            # FIXME: this has no effect because the final query is just running an id__in filter, without preserving order.
-            objs = objs.order_by(BM25().desc())
-
-        obj_ids = objs.values_list("index_entry__object_id", flat=True)
-
+            objs = objs.order_by(models.F("_score").desc())
+            
+        # Convert IDs to integers to ensure they match the Model's Primary Key type.
+        # Force IDs to integers
+        search_results = list(objs.values_list("index_entry__object_id", "_score"))
+        obj_ids = [int(r[0]) for r in search_results]
         if not negated:
             queryset = self.queryset.filter(
                 pk__in=obj_ids
             )  # We need to filter the source queryset to get the objects that matched the search query.
+            
+            if self.order_by_relevance and obj_ids:
+                
+                # Build the order logic
+                order_logic = Case(*[
+                    When(pk=pk, then=pos) for pos, pk in enumerate(obj_ids)
+                ], default=None) # Added default to be safe
+                
+                queryset = queryset.order_by(order_logic)
         else:
             queryset = self.queryset.exclude(
                 pk__in=obj_ids
