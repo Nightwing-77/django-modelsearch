@@ -533,7 +533,7 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
         # Convert IDs to integers to ensure they match the Model's Primary Key type.
         # Force IDs to integers
         search_results = list(objs.values_list("index_entry__object_id", "_score"))
-        obj_ids = [int(r[0]) for r in search_results]
+        obj_ids = [r[0] for r in search_results]
         if not negated:
             queryset = self.queryset.filter(
                 pk__in=obj_ids
