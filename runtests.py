@@ -23,7 +23,7 @@ def main():
 
     django.setup()
 
-    call_command("test")
+    call_command("test", *rest)
 
 
 if __name__ == "__main__":
