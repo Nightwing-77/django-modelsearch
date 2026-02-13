@@ -32,21 +32,22 @@ class BM25(Func):
         template=None,
     ):
         table_name = SQLiteFTSIndexEntry._meta.db_table
-        
+
         # If no weights provided, use default BM25
         if not self.weight_values:
-            return f"-bm25({table_name})", []  #added minus in weights
-        
+            return f"-bm25({table_name})", []  # added minus in weights
+
         # Embed weights directly in SQL (SQLite doesn't support params here)
         weights_str = ", ".join([str(float(w)) for w in self.weight_values])
-        sql = f"-bm25({table_name}, {weights_str})"  #added minus in weights
-        
-        return sql, [] 
-    
+        sql = f"-bm25({table_name}, {weights_str})"  # added minus in weights
+
+        return sql, []
+
     def __repr__(self):
         if self.weight_values:
             return f"BM25({', '.join(map(str, self.weight_values))})"
         return "BM25()"
+
 
 class LexemeCombinable(Expression):
     BITAND = "AND"

@@ -50,7 +50,7 @@ class TestSQLiteSearchBackend(BackendTests, TestCase):
     @skip("The SQLite backend doesn't support searching on specified fields.")
     def test_autocomplete_with_fields_arg(self):
         return super().test_autocomplete_with_fields_arg()
-    
+
     def test_ranking(self):
         return super().test_ranking()
 
