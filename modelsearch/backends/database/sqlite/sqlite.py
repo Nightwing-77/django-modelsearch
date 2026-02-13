@@ -451,7 +451,7 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
         elif isinstance(query, And):
             return (
                 MUL(
-                    1 + self.build_tsrank( subquery, config=config, boost=boost)
+                    1 + self.build_tsrank(subquery, config=config, boost=boost)
                     for subquery in query.subqueries
                 )
                 - 1
@@ -459,7 +459,7 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
 
         elif isinstance(query, Or):
             return ADD(
-                self.build_tsrank( subquery, config=config, boost=boost)
+                self.build_tsrank(subquery, config=config, boost=boost)
                 for subquery in query.subqueries
             ) / (len(query.subqueries) or 1)
 
@@ -479,7 +479,7 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
     def _build_rank_expression(self, vectors, config):
         # TODO: Come up with my own expression class that compiles down to bm25
         # We can't multiply BM25 by F() objects, so just return BM25 directly
-        return self.build_tsrank( self.query, config=config)
+        return self.build_tsrank(self.query, config=config)
 
     def search(self, config, start, stop, score_field=None):
         normalized_query = normalize(self.query)
