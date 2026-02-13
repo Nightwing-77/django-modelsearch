@@ -176,9 +176,6 @@ class BackendTests:
             [r.title for r in results],
             ["JavaScript: The good parts", "JavaScript: The Definitive Guide"],
         )
-
-        # "JavaScript: The Definitive Guide" should be first
-        print(results)
         self.assertEqual(results[0].title, "JavaScript: The Definitive Guide")
 
     def test_ranking_reverse(self):
@@ -191,8 +188,6 @@ class BackendTests:
             ["JavaScript: The good parts", "JavaScript: The Definitive Guide"],
         )
 
-        # "JavaScript: The Definitive Guide" should be first
-        print(results)
         self.assertEqual(results[0].title, "JavaScript: The good parts")
 
     def test_annotate_score(self):
