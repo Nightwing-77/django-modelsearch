@@ -21,7 +21,7 @@ def main():
         help="Specific test to run (e.g., modelsearch.tests.test_sqlite_backend.TestSQLiteSearchBackend.test_ranking)",
     )
 
-    args = parser.parse_args()
+    args, rest = parser.parse_known_args()
 
     os.environ["SEARCH_BACKEND"] = args.backend
     os.environ["DJANGO_SETTINGS_MODULE"] = "modelsearch.test.settings"
