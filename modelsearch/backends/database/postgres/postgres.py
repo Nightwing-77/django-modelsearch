@@ -350,17 +350,39 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
     def get_config(self, backend):
         return backend.config
 
-    def get_search_fields_for_model(self):
-        return self.queryset.model.get_searchable_search_fields()
 
+    def get_search_fields_for_model(self):
+        model = self.queryset.model
+        original_fields = model.get_search_fields()
+
+        flattened = {}
+
+        def walk(field, prefix=""):
+            if isinstance(field, RelatedFields):
+                new_prefix = prefix + field.field_name + LOOKUP_SEP
+                for sub in field.fields:
+                    walk(sub, new_prefix)
+            else:
+                # Clone leaf field with full lookup path
+                new_field_name = prefix + field.field_name
+
+                new_field = type(field)(
+                    new_field_name,
+                    boost=getattr(field, "boost", None),
+                    partial_match=getattr(field, "partial_match", False),
+                )
+
+                flattened[(type(new_field), new_field_name)] = new_field
+
+        for field in original_fields:
+            walk(field)
+
+        return list(flattened.values())
+    
+    #if fields by the fn then we'd need to filter out them as well
     def get_search_field(self, field_lookup, fields=None):
         if fields is None:
             fields = self.search_fields
-
-        if LOOKUP_SEP in field_lookup:
-            field_lookup, sub_field_name = field_lookup.split(LOOKUP_SEP, 1)
-        else:
-            sub_field_name = None
 
         for field in fields:
             if (
@@ -369,19 +391,7 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
             ):
                 return field
 
-            # Note: Searching on a specific related field using
-            # `.search(fields=…)` is not yet supported by Wagtail.
-            # This method anticipates by already implementing it.
-            # FIXME: this doesn't work because the list we're looping over comes from
-            # get_search_fields_for_model, which only returns `SearchField` records, not `RelatedFields`
-            if (
-                isinstance(field, RelatedFields)
-                and field.field_name == field_lookup
-                and sub_field_name is not None
-            ):
-                return self.get_search_field(
-                    sub_field_name, field.fields
-                )  # pragma: no cover
+        return None
 
     def build_tsquery_content(self, query, config=None, invert=False):
         if isinstance(query, PlainText):

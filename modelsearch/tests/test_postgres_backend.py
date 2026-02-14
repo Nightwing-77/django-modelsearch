@@ -200,6 +200,32 @@ class TestPostgresSearchBackend(BackendTests, TestCase):
         results = self.backend.search("JavaScript", models.Book)
         self.assertEqual(results.count(), 0)
 
+    def test_related_field_search_returns_parent_model(self):
+        """
+        Ensure that searching on a related field (authors__name)
+        returns the parent model instance.
+        """
+
+        # Create author
+        author = models.Author.objects.create(name="Guido van Rossum")
+
+        # Create book linked to that author
+        book = models.Book.objects.create(title="Python Internals",            
+                                        publication_date="1999-05-01",
+                                        number_of_pages=333,)
+        book.authors.add(author)
+
+        # Rebuild index if necessary
+        self.backend.add(book)
+
+        # Perform search using author name
+        results = self.backend.search("Guido", models.Book)
+
+        # Convert to list to evaluate queryset
+        results_list = list(results)
+
+        self.assertIn(book, results_list)
+
     @unittest.expectedFailure
     def test_get_search_field_for_related_fields(self):
         """
