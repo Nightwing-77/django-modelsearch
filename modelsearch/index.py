@@ -6,7 +6,7 @@ from django.core import checks
 from django.core.exceptions import FieldDoesNotExist
 from django.db import models
 from django.db.models.fields.related import ForeignObjectRel, OneToOneRel, RelatedField
-
+from django.db.models.constants import LOOKUP_SEP
 from modelsearch.backends import get_search_backends_with_name
 
 
@@ -66,9 +66,23 @@ class Indexed:
 
     @classmethod
     def get_searchable_search_fields(cls):
-        return [
-            field for field in cls.get_search_fields() if isinstance(field, SearchField)
-        ]
+        """
+        Returns all searchable fields for the model, including related fields,
+        as (original_field, full_lookup_name) tuples.
+        """
+        original_fields = cls.get_search_fields()
+
+        def walk(field, prefix=""):
+            if isinstance(field, RelatedFields):
+                new_prefix = prefix + field.field_name + LOOKUP_SEP
+                for sub_field in field.fields:
+                    yield from walk(sub_field, new_prefix)
+            elif isinstance(field, SearchField):
+                full_name = prefix + field.field_name
+                yield field, full_name
+
+        # Flatten all original fields and return a single list of tuples
+        return list(tuple_pair for field in original_fields for tuple_pair in walk(field))
 
     @classmethod
     def get_autocomplete_search_fields(cls):

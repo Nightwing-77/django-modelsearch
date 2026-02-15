@@ -13,7 +13,6 @@ from django.db import (
     transaction,
 )
 from django.db.models import Avg, Count, F, Manager, TextField, Value
-from django.db.models.constants import LOOKUP_SEP
 from django.db.models.functions import Cast, Length
 from django.db.models.sql.subqueries import InsertQuery
 from django.utils.encoding import force_str
@@ -337,7 +336,9 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
 
         if self.fields is None:
             # search over the fields defined on the current model
-            self.search_fields = local_search_fields
+            self.search_fields = {
+                full_name: field for field, full_name in local_search_fields
+            }
         else:
             # build a search_fields set from the passed definition,
             # which may involve traversing relations
@@ -352,63 +353,28 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
         return backend.config
 
     def get_search_fields_for_model(self):
-        model = self.queryset.model
-        original_fields = model.get_search_fields()
+        return self.queryset.model.get_searchable_search_fields()
 
-        flattened = {}
+    def get_search_field(self, full_name, fields=None):
+        """
+        Returns the SearchField object for the given full_name.
 
-        def walk(field, prefix=""):
-            if isinstance(field, RelatedFields):
-                new_prefix = prefix + field.field_name + LOOKUP_SEP
-                for sub in field.fields:
-                    walk(sub, new_prefix)
-            else:
-                # Clone leaf field with full lookup path
-                new_field_name = prefix + field.field_name
-
-                new_field = type(field)(
-                    new_field_name,
-                    boost=getattr(field, "boost", None),
-                    partial_match=getattr(field, "partial_match", False),
-                )
-
-                flattened[(type(new_field), new_field_name)] = new_field
-
-        for field in original_fields:
-            walk(field)
-
-        return list(flattened.values())
-
-
-    def get_search_field(self, field_lookup, fields=None):
+        :param full_name: the flattened field lookup, e.g., "authors__name"
+        :param fields: list of tuples (SearchField, full_name) from get_search_fields_for_model
+        """
         if fields is None:
-            fields = self.search_fields
+            fields = self.search_fields  # fallback to the dict {full_name: SearchField}
 
-        if LOOKUP_SEP in field_lookup:
-            field_lookup, sub_field_name = field_lookup.split(LOOKUP_SEP, 1)
-        else:
-            sub_field_name = None
+        # If it's a dict, just lookup directly
+        if isinstance(fields, dict):
+            return fields.get(full_name)
 
-        for field in fields:
-            if (
-                isinstance(field, self.TARGET_SEARCH_FIELD_TYPE)
-                and field.field_name == field_lookup
-            ):
-                return field
+        # Otherwise, iterate through the tuples
+        for field_obj, fname in fields:
+            if fname == full_name:
+                return field_obj
 
-            # Note: Searching on a specific related field using
-            # `.search(fields=…)` is not yet supported by Wagtail.
-            # This method anticipates by already implementing it.
-            # FIXME: this doesn't work because the list we're looping over comes from
-            # get_search_fields_for_model, which only returns `SearchField` records, not `RelatedFields`
-            if (
-                isinstance(field, RelatedFields)
-                and field.field_name == field_lookup
-                and sub_field_name is not None
-            ):
-                return self.get_search_field(
-                    sub_field_name, field.fields
-                )  # pragma: no cover
+        return None
 
     def build_tsquery_content(self, query, config=None, invert=False):
         if isinstance(query, PlainText):
