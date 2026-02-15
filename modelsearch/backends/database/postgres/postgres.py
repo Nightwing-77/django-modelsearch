@@ -353,7 +353,7 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
         return backend.config
 
     def get_search_fields_for_model(self):
-        return self.queryset.model.get_searchable_search_fields()
+        return self.queryset.model.get_searchable_search_fields_with_relatives()
 
     def get_search_field(self, full_name, fields=None):
         """

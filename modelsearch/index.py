@@ -66,6 +66,13 @@ class Indexed:
 
     @classmethod
     def get_searchable_search_fields(cls):
+        return [
+            field for field in cls.get_search_fields() if isinstance(field, SearchField)
+        ]
+    
+    
+    @classmethod
+    def get_searchable_search_fields_with_relatives(cls):
         """
         Returns all searchable fields for the model, including related fields,
         as (original_field, full_lookup_name) tuples.
