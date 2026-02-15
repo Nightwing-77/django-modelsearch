@@ -4,6 +4,7 @@ import warnings
 from collections import OrderedDict
 from functools import reduce
 
+from django.contrib.postgres.aggregates import StringAgg
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.db import (
     NotSupportedError,
@@ -350,7 +351,6 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
     def get_config(self, backend):
         return backend.config
 
-
     def get_search_fields_for_model(self):
         model = self.queryset.model
         original_fields = model.get_search_fields()
@@ -378,8 +378,7 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
             walk(field)
 
         return list(flattened.values())
-    
-    #if fields by the fn then we'd need to filter out them as well
+
     def get_search_field(self, field_lookup, fields=None):
         if fields is None:
             fields = self.search_fields
@@ -588,17 +587,34 @@ class PostgresAutocompleteQueryCompiler(PostgresSearchQueryCompiler):
         return [(F("index_entries__autocomplete"), 1.0)]
 
     def get_fields_vectors(self, search_query):
-        return [
-            (
-                SearchVector(
-                    field_lookup,
-                    config=search_query.config,
-                    weight="D",
-                ),
-                1.0,
+        vectors = []
+
+        for field_lookup, search_field in self.search_fields.items():
+            root, sub = self.get_search_field(field_lookup)
+
+            if sub:
+                # Annotate the subfield values into a temporary field
+                annotated_name = f"{root}_{sub}"
+                if annotated_name not in self.queryset.query.annotations:
+                    self.queryset = self.queryset.annotate(
+                        **{annotated_name: StringAgg(f"{root}__{sub}", delimiter=" ")}
+                    )
+                vector_field = annotated_name
+            else:
+                vector_field = root
+
+            vectors.append(
+                (
+                    SearchVector(
+                        vector_field,
+                        config=search_query.config,
+                        weight="D",
+                    ),
+                    getattr(search_field, "boost", 1.0),
+                )
             )
-            for field_lookup, search_field in self.search_fields.items()
-        ]
+
+        return vectors
 
 
 class PostgresSearchResults(BaseSearchResults):
