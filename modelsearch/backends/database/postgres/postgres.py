@@ -4,7 +4,6 @@ import warnings
 from collections import OrderedDict
 from functools import reduce
 
-from django.contrib.postgres.aggregates import StringAgg
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 from django.db import (
     NotSupportedError,
@@ -12,6 +11,7 @@ from django.db import (
     router,
     transaction,
 )
+from django.contrib.postgres.aggregates import StringAgg
 from django.db.models import Avg, Count, F, Manager, TextField, Value
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.functions import Cast, Length
@@ -382,6 +382,11 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
     def get_search_field(self, field_lookup, fields=None):
         if fields is None:
             fields = self.search_fields
+
+        if LOOKUP_SEP in field_lookup:
+            field_lookup, sub_field_name = field_lookup.split(LOOKUP_SEP, 1)
+        else:
+            sub_field_name = None
 
         for field in fields:
             if (
