@@ -5,8 +5,9 @@ from django.apps import apps
 from django.core import checks
 from django.core.exceptions import FieldDoesNotExist
 from django.db import models
-from django.db.models.fields.related import ForeignObjectRel, OneToOneRel, RelatedField
 from django.db.models.constants import LOOKUP_SEP
+from django.db.models.fields.related import ForeignObjectRel, OneToOneRel, RelatedField
+
 from modelsearch.backends import get_search_backends_with_name
 
 
@@ -93,11 +94,18 @@ class Indexed:
 
     @classmethod
     def get_autocomplete_search_fields(cls):
-        return [
+        """
+        Returns autocomplete fields as (field_obj, full_lookup_name) tuples,
+        without changing the original filtering logic.
+        """
+        fields = [
             field
             for field in cls.get_search_fields()
             if isinstance(field, AutocompleteField)
         ]
+
+        # Convert each field to a tuple (field_obj, field_name)
+        return [(field, field.field_name) for field in fields]
 
     @classmethod
     def get_filterable_search_fields(cls):
@@ -357,6 +365,14 @@ class RelatedFields:
 
     def get_value(self, obj):
         field = self.get_field(obj.__class__)
+
+        if isinstance(field, OneToOneRel):
+            # Following a reverse one-to-one relation will raise a DoesNotExist exception if there is no related object;
+            # treat this as None instead
+            try:
+                return getattr(obj, self.field_name)
+            except field.related_model.DoesNotExist:
+                return None
 
         if isinstance(field, (RelatedField, ForeignObjectRel)):
             return getattr(obj, self.field_name)

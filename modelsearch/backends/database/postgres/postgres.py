@@ -6,12 +6,7 @@ from functools import reduce
 
 from django.contrib.postgres.aggregates import StringAgg
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
-from django.db import (
-    NotSupportedError,
-    connections,
-    router,
-    transaction,
-)
+from django.db import NotSupportedError, connections, router, transaction
 from django.db.models import Avg, Count, F, Manager, TextField, Value
 from django.db.models.functions import Cast, Length
 from django.db.models.sql.subqueries import InsertQuery
@@ -22,12 +17,7 @@ from modelsearch.conf import get_app_config
 
 from ....index import AutocompleteField, RelatedFields, SearchField, get_indexed_models
 from ....query import And, Boost, MatchAll, Not, Or, Phrase, PlainText
-from ....utils import (
-    ADD,
-    MUL,
-    get_content_type_pk,
-    get_descendants_content_types_pks,
-)
+from ....utils import ADD, MUL, get_content_type_pk, get_descendants_content_types_pks
 from ...base import (
     BaseIndex,
     BaseSearchBackend,
@@ -354,24 +344,30 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
 
     def get_search_fields_for_model(self):
         return self.queryset.model.get_searchable_search_fields_with_relatives()
-
-    def get_search_field(self, full_name, fields=None):
+        
+    def get_search_field(self, full_name, fields=None, as_tuple=False):
         """
-        Returns the SearchField object for the given full_name.
+        Returns the SearchField (or AutocompleteField) for the given full_name.
 
         :param full_name: the flattened field lookup, e.g., "authors__name"
-        :param fields: list of tuples (SearchField, full_name) from get_search_fields_for_model
+        :param fields: list of tuples (field_obj, full_name) from get_search_fields_for_model
+        :param as_tuple: if True, return (field_obj, full_lookup_name) tuple
         """
         if fields is None:
-            fields = self.search_fields  # fallback to the dict {full_name: SearchField}
+            fields = self.search_fields  # could be dict {full_name: field_obj}
 
-        # If it's a dict, just lookup directly
+        # Dict case
         if isinstance(fields, dict):
-            return fields.get(full_name)
+            field = fields.get(full_name)
+            if field is not None and as_tuple:
+                return field, full_name
+            return field
 
-        # Otherwise, iterate through the tuples
+        # List of tuples case
         for field_obj, fname in fields:
             if fname == full_name:
+                if as_tuple:
+                    return field_obj, fname
                 return field_obj
 
         return None
@@ -569,23 +565,29 @@ class PostgresAutocompleteQueryCompiler(PostgresSearchQueryCompiler):
 
     def get_index_vectors(self, search_query):
         return [(F("index_entries__autocomplete"), 1.0)]
-
+        
     def get_fields_vectors(self, search_query):
         vectors = []
 
         for field_lookup, search_field in self.search_fields.items():
-            root, sub = self.get_search_field(field_lookup)
+            # Get (field_obj, full_lookup_name) tuple safely
+            result = self.get_search_field(full_name=field_lookup, as_tuple=True)
+            if result is None:
+                continue  # skip missing fields
 
-            if sub:
-                # Annotate the subfield values into a temporary field
-                annotated_name = f"{root}_{sub}"
-                if annotated_name not in self.queryset.query.annotations:
-                    self.queryset = self.queryset.annotate(
-                        **{annotated_name: StringAgg(f"{root}__{sub}", delimiter=" ")}
-                    )
+            root_field_obj, full_name = result
+
+            # For autocomplete fields, there is usually no subfield
+            # We'll treat full_name as the vector source
+            vector_field = full_name
+
+            # Optionally annotate if you want to handle subfields (rare for autocomplete)
+            annotated_name = f"{root_field_obj.field_name}_{full_name}"
+            if annotated_name not in self.queryset.query.annotations:
+                self.queryset = self.queryset.annotate(
+                    **{annotated_name: StringAgg(full_name, delimiter=" ")}
+                )
                 vector_field = annotated_name
-            else:
-                vector_field = root
 
             vectors.append(
                 (
@@ -594,7 +596,7 @@ class PostgresAutocompleteQueryCompiler(PostgresSearchQueryCompiler):
                         config=search_query.config,
                         weight="D",
                     ),
-                    getattr(search_field, "boost", 1.0),
+                    getattr(root_field_obj, "boost", 1.0),
                 )
             )
 

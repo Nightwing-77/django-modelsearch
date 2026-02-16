@@ -238,7 +238,6 @@ class TestPostgresSearchBackend(BackendTests, TestCase):
         results_list = list(results)
         self.assertIn(book, results_list)
 
-    @unittest.expectedFailure
     def test_get_search_field_for_related_fields(self):
         """
         The get_search_field method of PostgresSearchQueryCompiler attempts to support retrieving
