@@ -1,8 +1,15 @@
 from collections import OrderedDict
 from functools import reduce
 
-from django.db import NotSupportedError, connections, models, router, transaction
+from django.db import (
+    NotSupportedError,
+    connections,
+    models,
+    router,
+    transaction,
+)
 from django.db.models import Avg, Case, Count, F, Manager, TextField, When
+from django.db.models.constants import LOOKUP_SEP
 from django.db.models.functions import Cast, Length
 from django.utils.encoding import force_str
 from django.utils.functional import cached_property
