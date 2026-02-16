@@ -310,7 +310,8 @@ class BaseSearchQueryCompiler:
         if self.fields:
             # allowed_fields now uses full lookup names
             allowed_fields = {
-                full_name for _, full_name in self.queryset.model.get_searchable_search_fields_with_relatives()
+                full_name
+                for _, full_name in self.queryset.model.get_searchable_search_fields_with_relatives()
             }
 
             for field_name in self.fields:

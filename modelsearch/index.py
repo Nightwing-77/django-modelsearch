@@ -68,10 +68,11 @@ class Indexed:
     @classmethod
     def get_searchable_search_fields(cls):
         return [
-            field for field in cls.get_search_fields() if isinstance(field, SearchField)
+            (field, field.field_name)
+            for field in cls.get_search_fields()
+            if isinstance(field, SearchField)
         ]
-    
-    
+
     @classmethod
     def get_searchable_search_fields_with_relatives(cls):
         """
@@ -90,7 +91,7 @@ class Indexed:
                 yield field, full_name
 
         # Flatten all original fields and return a single list of tuples
-        return list(tuple_pair for field in original_fields for tuple_pair in walk(field))
+        return [tuple_pair for field in original_fields for tuple_pair in walk(field)]
 
     @classmethod
     def get_autocomplete_search_fields(cls):

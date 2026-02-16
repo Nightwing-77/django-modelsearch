@@ -352,7 +352,6 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
 
         return None
 
-
     def build_search_query_content(self, query, config=None):
         """
         Takes a SearchQuery and returns another SearchQuery object, which can be used to construct the query in SQL.

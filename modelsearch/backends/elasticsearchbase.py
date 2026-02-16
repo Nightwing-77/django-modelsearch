@@ -1,4 +1,5 @@
 import json
+
 from collections import OrderedDict
 from copy import deepcopy
 from datetime import time
@@ -10,15 +11,24 @@ from django.db.models.sql import Query
 from django.db.models.sql.constants import MULTI, SINGLE
 from django.utils.crypto import get_random_string
 
-from modelsearch.backends.base import (BaseIndex, BaseSearchBackend,
-                                       BaseSearchQueryCompiler,
-                                       BaseSearchResults, FilterFieldError,
-                                       get_model_root)
-from modelsearch.index import (AutocompleteField, FilterField, Indexed,
-                               RelatedFields, SearchField, class_is_indexed,
-                               get_indexed_models)
-from modelsearch.query import (And, Boost, Fuzzy, MatchAll, Not, Or, Phrase,
-                               PlainText)
+from modelsearch.backends.base import (
+    BaseIndex,
+    BaseSearchBackend,
+    BaseSearchQueryCompiler,
+    BaseSearchResults,
+    FilterFieldError,
+    get_model_root,
+)
+from modelsearch.index import (
+    AutocompleteField,
+    FilterField,
+    Indexed,
+    RelatedFields,
+    SearchField,
+    class_is_indexed,
+    get_indexed_models,
+)
+from modelsearch.query import And, Boost, Fuzzy, MatchAll, Not, Or, Phrase, PlainText
 from modelsearch.utils import deep_update
 
 
@@ -266,7 +276,7 @@ class ElasticsearchBaseMapping:
             value = self._clean_value(field.get_value(obj))
 
             if isinstance(field, RelatedFields):
-                if isinstance(value, (models.Manager, models.QuerySet)):
+                if isinstance(value, models.Manager | models.QuerySet):
                     nested_docs = []
 
                     for nested_obj in value.all():
@@ -283,11 +293,11 @@ class ElasticsearchBaseMapping:
                     )
                     edgengrams.extend(extra_edgengrams)
             elif isinstance(field, FilterField):
-                if isinstance(value, (models.Manager, models.QuerySet)):
+                if isinstance(value, models.Manager | models.QuerySet):
                     value = list(value.values_list("pk", flat=True))
                 elif isinstance(value, models.Model):
                     value = value.pk
-                elif isinstance(value, (list, tuple)):
+                elif isinstance(value, list | tuple):
                     value = [
                         item.pk if isinstance(item, models.Model) else item
                         for item in value
@@ -475,7 +485,7 @@ class ElasticsearchBaseSearchQueryCompiler(BaseSearchQueryCompiler):
                     continue
 
                 # NEW: unpack tuple
-                for field_obj, _full_name in model.get_searchable_search_fields_with_relatives():
+                for field_obj, _full_name in model.get_searchable_search_fields():
                     boost = getattr(field_obj, "boost", None)
                     if boost is not None:
                         unique_boosts.add(float(boost))
@@ -493,7 +503,7 @@ class ElasticsearchBaseSearchQueryCompiler(BaseSearchQueryCompiler):
         column_name = self.mapping.get_field_column_name(field)
 
         if lookup == "exact":
-            if isinstance(value, (Query, Subquery)):
+            if isinstance(value, Query | Subquery):
                 db_alias = self.queryset._db or DEFAULT_DB_ALIAS
                 query = value.query if isinstance(value, Subquery) else value
                 value = query.get_compiler(db_alias).execute_sql(result_type=SINGLE)
@@ -548,7 +558,7 @@ class ElasticsearchBaseSearchQueryCompiler(BaseSearchQueryCompiler):
             }
 
         if lookup == "in":
-            if isinstance(value, (Query, Subquery)):
+            if isinstance(value, Query | Subquery):
                 db_alias = self.queryset._db or DEFAULT_DB_ALIAS
                 query = value.query if isinstance(value, Subquery) else value
                 resultset = query.get_compiler(db_alias).execute_sql(result_type=MULTI)

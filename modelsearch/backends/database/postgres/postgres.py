@@ -344,7 +344,7 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
 
     def get_search_fields_for_model(self):
         return self.queryset.model.get_searchable_search_fields_with_relatives()
-        
+
     def get_search_field(self, full_name, fields=None, as_tuple=False):
         """
         Returns the SearchField (or AutocompleteField) for the given full_name.
@@ -447,7 +447,7 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
         return self.build_tsquery_content(query, config=config)
 
     def build_tsrank(self, vector, query, config=None, boost=1.0):
-        if isinstance(query, (Phrase, PlainText, Not)):
+        if isinstance(query, Phrase | PlainText | Not):
             rank_expression = SearchRank(
                 vector,
                 self.build_tsquery(query, config=config),
@@ -565,11 +565,11 @@ class PostgresAutocompleteQueryCompiler(PostgresSearchQueryCompiler):
 
     def get_index_vectors(self, search_query):
         return [(F("index_entries__autocomplete"), 1.0)]
-        
+
     def get_fields_vectors(self, search_query):
         vectors = []
 
-        for field_lookup, search_field in self.search_fields.items():
+        for field_lookup, _search_field in self.search_fields.items():
             # Get (field_obj, full_lookup_name) tuple safely
             result = self.get_search_field(full_name=field_lookup, as_tuple=True)
             if result is None:
