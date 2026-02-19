@@ -96,6 +96,8 @@ MODELSEARCH_BACKENDS = {
     "default": {
         "BACKEND": {
             "db": "modelsearch.backends.database",
+            "postgres": "modelsearch.backends.database.postgres.postgres",
+            "sqlite": "modelsearch.backends.database.sqlite.sqlite",
             "elasticsearch7": "modelsearch.backends.elasticsearch7",
             "elasticsearch8": "modelsearch.backends.elasticsearch8",
             "elasticsearch9": "modelsearch.backends.elasticsearch9",

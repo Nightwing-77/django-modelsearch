@@ -298,19 +298,20 @@ class BaseSearchQueryCompiler:
         """
         Checks that the search query satisfies the following conditions:
 
-        1. All field names passed in the ``fields`` parameter exist as ``SearchField`` records on the model.
+        1. All field names passed in the ``fields`` parameter exist as searchable fields on the model.
         2. All fields used within filters on the passed ``queryset`` exist as ``FilterField`` records on the model.
         3. The ``order_by`` clause on the passed ``queryset`` does not contain any expressions other than plain field
-           names and their reversed counterparts (``"some_field"`` and ``"-some_field"``), unless
-           ``HANDLES_ORDER_BY_EXPRESSIONS`` is ``True``.
+        names and their reversed counterparts (``"some_field"`` and ``"-some_field"``), unless
+        ``HANDLES_ORDER_BY_EXPRESSIONS`` is ``True``.
         4. All field names within the ``order_by`` clause on the passed ``queryset`` exist as ``FilterField`` records
-           on the model.
+        on the model.
         """
         # Check search fields
         if self.fields:
+            # allowed_fields now uses full lookup names
             allowed_fields = {
-                field.field_name
-                for field in self.queryset.model.get_searchable_search_fields()
+                full_name
+                for _, full_name in self.queryset.model.get_searchable_search_fields_with_relatives()
             }
 
             for field_name in self.fields:

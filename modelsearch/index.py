@@ -5,6 +5,7 @@ from django.apps import apps
 from django.core import checks
 from django.core.exceptions import FieldDoesNotExist
 from django.db import models
+from django.db.models.constants import LOOKUP_SEP
 from django.db.models.fields.related import ForeignObjectRel, OneToOneRel, RelatedField
 
 from modelsearch.backends import get_search_backends_with_name
@@ -67,16 +68,45 @@ class Indexed:
     @classmethod
     def get_searchable_search_fields(cls):
         return [
-            field for field in cls.get_search_fields() if isinstance(field, SearchField)
+            (field, field.field_name)
+            for field in cls.get_search_fields()
+            if isinstance(field, SearchField)
         ]
 
     @classmethod
+    def get_searchable_search_fields_with_relatives(cls):
+        """
+        Returns all searchable fields for the model, including related fields,
+        as (original_field, full_lookup_name) tuples.
+        """
+        original_fields = cls.get_search_fields()
+
+        def walk(field, prefix=""):
+            if isinstance(field, RelatedFields):
+                new_prefix = prefix + field.field_name + LOOKUP_SEP
+                for sub_field in field.fields:
+                    yield from walk(sub_field, new_prefix)
+            elif isinstance(field, SearchField):
+                full_name = prefix + field.field_name
+                yield field, full_name
+
+        # Flatten all original fields and return a single list of tuples
+        return [tuple_pair for field in original_fields for tuple_pair in walk(field)]
+
+    @classmethod
     def get_autocomplete_search_fields(cls):
-        return [
+        """
+        Returns autocomplete fields as (field_obj, full_lookup_name) tuples,
+        without changing the original filtering logic.
+        """
+        fields = [
             field
             for field in cls.get_search_fields()
             if isinstance(field, AutocompleteField)
         ]
+
+        # Convert each field to a tuple (field_obj, field_name)
+        return [(field, field.field_name) for field in fields]
 
     @classmethod
     def get_filterable_search_fields(cls):
@@ -336,6 +366,14 @@ class RelatedFields:
 
     def get_value(self, obj):
         field = self.get_field(obj.__class__)
+
+        if isinstance(field, OneToOneRel):
+            # Following a reverse one-to-one relation will raise a DoesNotExist exception if there is no related object;
+            # treat this as None instead
+            try:
+                return getattr(obj, self.field_name)
+            except field.related_model.DoesNotExist:
+                return None
 
         if isinstance(field, (RelatedField, ForeignObjectRel)):
             return getattr(obj, self.field_name)

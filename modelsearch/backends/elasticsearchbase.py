@@ -276,7 +276,7 @@ class ElasticsearchBaseMapping:
             value = self._clean_value(field.get_value(obj))
 
             if isinstance(field, RelatedFields):
-                if isinstance(value, (models.Manager, models.QuerySet)):
+                if isinstance(value, models.Manager | models.QuerySet):
                     nested_docs = []
 
                     for nested_obj in value.all():
@@ -293,11 +293,11 @@ class ElasticsearchBaseMapping:
                     )
                     edgengrams.extend(extra_edgengrams)
             elif isinstance(field, FilterField):
-                if isinstance(value, (models.Manager, models.QuerySet)):
+                if isinstance(value, models.Manager | models.QuerySet):
                     value = list(value.values_list("pk", flat=True))
                 elif isinstance(value, models.Model):
                     value = value.pk
-                elif isinstance(value, (list, tuple)):
+                elif isinstance(value, list | tuple):
                     value = [
                         item.pk if isinstance(item, models.Model) else item
                         for item in value
@@ -460,24 +460,35 @@ class ElasticsearchBaseSearchQueryCompiler(BaseSearchQueryCompiler):
         """Convert field names into index column names and add boosts."""
 
         remapped_fields = []
+
         if fields:
-            searchable_fields = {f.field_name: f for f in self.get_searchable_fields()}
+            # NEW: unpack tuple
+            searchable_fields = {
+                full_name: field_obj
+                for field_obj, full_name in self.get_searchable_fields()
+            }
+
             for field_name in fields:
                 field = searchable_fields.get(field_name)
                 if field:
                     field_name = self.mapping.get_field_column_name(field)
                     remapped_fields.append(Field(field_name, field.boost or 1))
+
         else:
             remapped_fields.append(Field(self.mapping.all_field_name))
 
             models = get_indexed_models()
             unique_boosts = set()
+
             for model in models:
                 if not issubclass(model, self.queryset.model):
                     continue
-                for field in model.get_searchable_search_fields():
-                    if field.boost:
-                        unique_boosts.add(float(field.boost))
+
+                # NEW: unpack tuple
+                for field_obj, _full_name in model.get_searchable_search_fields():
+                    boost = getattr(field_obj, "boost", None)
+                    if boost is not None:
+                        unique_boosts.add(float(boost))
 
             remapped_fields.extend(
                 [
@@ -492,7 +503,7 @@ class ElasticsearchBaseSearchQueryCompiler(BaseSearchQueryCompiler):
         column_name = self.mapping.get_field_column_name(field)
 
         if lookup == "exact":
-            if isinstance(value, (Query, Subquery)):
+            if isinstance(value, Query | Subquery):
                 db_alias = self.queryset._db or DEFAULT_DB_ALIAS
                 query = value.query if isinstance(value, Subquery) else value
                 value = query.get_compiler(db_alias).execute_sql(result_type=SINGLE)
@@ -547,7 +558,7 @@ class ElasticsearchBaseSearchQueryCompiler(BaseSearchQueryCompiler):
             }
 
         if lookup == "in":
-            if isinstance(value, (Query, Subquery)):
+            if isinstance(value, Query | Subquery):
                 db_alias = self.queryset._db or DEFAULT_DB_ALIAS
                 query = value.query if isinstance(value, Subquery) else value
                 resultset = query.get_compiler(db_alias).execute_sql(result_type=MULTI)
@@ -780,7 +791,7 @@ class ElasticsearchBaseSearchQueryCompiler(BaseSearchQueryCompiler):
             return inner_query
 
     def get_searchable_fields(self):
-        return self.queryset.model.get_searchable_search_fields()
+        return self.queryset.model.get_searchable_search_fields_with_relatives()
 
     def get_sort(self):
         # Ordering by relevance is the default in Elasticsearch
@@ -1007,15 +1018,18 @@ class ElasticsearchAutocompleteQueryCompilerImpl:
         # Note: this overrides ElasticsearchBaseSearchQueryCompiler by using autocomplete fields instead of searchable fields
         if self.fields:
             fields = []
+
+            # Build a dict: full_lookup_name -> field_obj
             autocomplete_fields = {
-                f.field_name: f
-                for f in self.queryset.model.get_autocomplete_search_fields()
+                full_name: field_obj
+                for field_obj, full_name in self.queryset.model.get_autocomplete_search_fields()
             }
+
             for field_name in self.fields:
                 if field_name in autocomplete_fields:
-                    field_name = self.mapping.get_field_column_name(
-                        autocomplete_fields[field_name]
-                    )
+                    # Map to index column name using the field object
+                    field_obj = autocomplete_fields[field_name]
+                    field_name = self.mapping.get_field_column_name(field_obj)
 
                 fields.append(field_name)
 
