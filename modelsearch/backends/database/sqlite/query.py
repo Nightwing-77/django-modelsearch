@@ -173,7 +173,6 @@ class CombinedSearchQueryExpression(SearchQueryCombinable, CombinedExpression):
 
 class MatchExpression(Expression):
     filterable = True
-    template = f"{SQLiteFTSIndexEntry._meta.db_table} MATCH %s"  # TODO: Can the table name be inferred from the query instead?
     output_field = BooleanField()
 
     def __init__(self, columns: list[str], query: SearchQueryCombinable) -> None:
@@ -182,6 +181,7 @@ class MatchExpression(Expression):
         self.query = query
 
     def as_sql(self, compiler, connection):
+        self.template = f"{compiler.query.base_table} MATCH %s"
         joined_columns = " ".join(
             self.columns
         )  # The format of the columns is 'column1 column2'
