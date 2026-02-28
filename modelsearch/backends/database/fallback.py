@@ -42,7 +42,8 @@ class DatabaseSearchQueryCompiler(BaseSearchQueryCompiler):
     def get_fields_names(self):
         model = self.queryset.model
         fields_names = self.fields or [
-            field.field_name for field in model.get_searchable_search_fields()
+            field.field_name
+            for field, _full_name in model.get_searchable_search_fields()
         ]
         # Check if the field exists (this will filter out indexed callables)
         for field_name in fields_names:
