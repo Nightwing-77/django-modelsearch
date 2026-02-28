@@ -218,7 +218,6 @@ class TestMySQLSearchBackend(BackendTests, TransactionTestCase):
         results = self.backend.search("JavaScript", models.Book)
         self.assertEqual(results.count(), 0)
 
-    @unittest.expectedFailure
     def test_get_search_field_for_related_fields(self):
         """
         The get_search_field method of MySQLSearchQueryCompiler attempts to support retrieving

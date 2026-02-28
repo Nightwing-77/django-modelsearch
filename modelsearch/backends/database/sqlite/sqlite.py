@@ -4,11 +4,11 @@ from functools import reduce
 from django.db import (
     NotSupportedError,
     connections,
+    models,
     router,
     transaction,
 )
-from django.db.models import Avg, Count, F, Manager, TextField
-from django.db.models.constants import LOOKUP_SEP
+from django.db.models import Avg, Case, Count, F, Manager, TextField, When
 from django.db.models.functions import Cast, Length
 from django.utils.encoding import force_str
 from django.utils.functional import cached_property
@@ -17,12 +17,7 @@ from modelsearch.conf import get_app_config
 
 from ....index import AutocompleteField, RelatedFields, SearchField, get_indexed_models
 from ....query import And, MatchAll, Not, Or, Phrase, PlainText
-from ....utils import (
-    ADD,
-    MUL,
-    get_content_type_pk,
-    get_descendants_content_types_pks,
-)
+from ....utils import ADD, MUL, get_content_type_pk, get_descendants_content_types_pks
 from ...base import (
     BaseIndex,
     BaseSearchBackend,
@@ -323,7 +318,9 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
 
         if self.fields is None:
             # search over the fields defined on the current model
-            self.search_fields = local_search_fields
+            self.search_fields = {
+                full_name: field for field, full_name in local_search_fields
+            }
         else:
             # build a search_fields set from the passed definition,
             # which may involve traversing relations
@@ -338,37 +335,28 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
         return backend.config
 
     def get_search_fields_for_model(self):
-        return self.queryset.model.get_searchable_search_fields()
+        return self.queryset.model.get_searchable_search_fields_with_relatives()
 
-    def get_search_field(self, field_lookup, fields=None):
+    def get_search_field(self, full_name, fields=None):
+        """
+        Returns the SearchField object for the given full_name.
+
+        :param full_name: the flattened field lookup, e.g., "authors__name"
+        :param fields: list of tuples (SearchField, full_name) from get_search_fields_for_model
+        """
         if fields is None:
-            fields = self.search_fields
+            fields = self.search_fields  # fallback to the dict {full_name: SearchField}
 
-        if LOOKUP_SEP in field_lookup:
-            field_lookup, sub_field_name = field_lookup.split(LOOKUP_SEP, 1)
-        else:
-            sub_field_name = None
+        # If it's a dict, just lookup directly
+        if isinstance(fields, dict):
+            return fields.get(full_name)
 
-        for field in fields:
-            if (
-                isinstance(field, self.TARGET_SEARCH_FIELD_TYPE)
-                and field.field_name == field_lookup
-            ):
-                return field
+        # Otherwise, iterate through the tuples
+        for field_obj, fname in fields:
+            if fname == full_name:
+                return field_obj
 
-            # Note: Searching on a specific related field using
-            # `.search(fields=…)` is not yet supported by Wagtail.
-            # This method anticipates by already implementing it.
-            # FIXME: this doesn't work because the list we're looping over comes from
-            # get_search_fields_for_model, which only returns `SearchField` records, not `RelatedFields`
-            if (
-                isinstance(field, RelatedFields)
-                and field.field_name == field_lookup
-                and sub_field_name is not None
-            ):
-                return self.get_search_field(
-                    sub_field_name, field.fields
-                )  # pragma: no cover
+        return None
 
     def build_search_query_content(self, query, config=None):
         """
@@ -408,7 +396,7 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
             combined_query = subquery_a._combine(subquery_b, "NOT")
             return combined_query
 
-        elif isinstance(query, (And, Or)):
+        elif isinstance(query, And | Or):
             subquery_lexemes = [
                 self.build_search_query_content(subquery, config=config)
                 for subquery in query.subqueries
@@ -437,19 +425,20 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
             built_query = self.build_search_query_content(query, config=config)
         return built_query
 
-    def build_tsrank(self, vector, query, config=None, boost=1.0):
-        if isinstance(query, (Phrase, PlainText, Not)):
-            rank_expression = BM25()
-
-            if boost != 1.0:
-                rank_expression *= boost
+    def build_tsrank(self, query, config=None, boost=1.0):
+        if isinstance(query, Phrase | PlainText | Not):
+            # Exact weights for FTS5 columns: [index_entry_id, title, body, autocomplete]
+            # switching from boosting to weights
+            # We boost title (1000.0) and body (100.0)
+            weights = [0.0, 1000.0, 100.0, 1.0]
+            rank_expression = BM25(*weights)
 
             return rank_expression
 
         elif isinstance(query, And):
             return (
                 MUL(
-                    1 + self.build_tsrank(vector, subquery, config=config, boost=boost)
+                    1 + self.build_tsrank(subquery, config=config, boost=boost)
                     for subquery in query.subqueries
                 )
                 - 1
@@ -457,7 +446,7 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
 
         elif isinstance(query, Or):
             return ADD(
-                self.build_tsrank(vector, subquery, config=config, boost=boost)
+                self.build_tsrank(subquery, config=config, boost=boost)
                 for subquery in query.subqueries
             ) / (len(query.subqueries) or 1)
 
@@ -476,17 +465,8 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
 
     def _build_rank_expression(self, vectors, config):
         # TODO: Come up with my own expression class that compiles down to bm25
-
-        rank_expressions = [
-            self.build_tsrank(vector, self.query, config=config) * boost
-            for vector, boost in vectors
-        ]
-
-        rank_expression = rank_expressions[0]
-        for other_rank_expression in rank_expressions[1:]:
-            rank_expression += other_rank_expression
-
-        return rank_expression
+        # We can't multiply BM25 by F() objects, so just return BM25 directly
+        return self.build_tsrank(self.query, config=config)
 
     def search(self, config, start, stop, score_field=None):
         normalized_query = normalize(self.query)
@@ -533,17 +513,27 @@ class SQLiteSearchQueryCompiler(BaseSearchQueryCompiler):
                 )
             )
         )
-
+        objs = objs.annotate(_score=rank_expression)
         if self.order_by_relevance:
-            # FIXME: this has no effect because the final query is just running an id__in filter, without preserving order.
-            objs = objs.order_by(BM25().desc())
+            objs = objs.order_by(models.F("_score").desc())
 
-        obj_ids = objs.values_list("index_entry__object_id", flat=True)
-
+        # Convert IDs to integers to ensure they match the Model's Primary Key type.
+        # Force IDs to integers
+        search_results = list(objs.values_list("index_entry__object_id", "_score"))
+        obj_ids = [r[0] for r in search_results]
         if not negated:
             queryset = self.queryset.filter(
                 pk__in=obj_ids
             )  # We need to filter the source queryset to get the objects that matched the search query.
+
+            if self.order_by_relevance and obj_ids:
+                # Build the order logic
+                order_logic = Case(
+                    *[When(pk=pk, then=pos) for pos, pk in enumerate(obj_ids)],
+                    default=None,
+                )  # Added default to be safe
+
+                queryset = queryset.order_by(order_logic)
         else:
             queryset = self.queryset.exclude(
                 pk__in=obj_ids

@@ -3,15 +3,9 @@ import warnings
 
 from collections import OrderedDict
 
-from django.db import (
-    NotSupportedError,
-    connections,
-    router,
-    transaction,
-)
+from django.db import NotSupportedError, connections, router, transaction
 from django.db.models import Case, OuterRef, Subquery, When
 from django.db.models.aggregates import Avg, Count
-from django.db.models.constants import LOOKUP_SEP
 from django.db.models.expressions import F
 from django.db.models.fields import BooleanField, FloatField, TextField
 from django.db.models.functions.comparison import Cast
@@ -292,7 +286,9 @@ class MySQLSearchQueryCompiler(BaseSearchQueryCompiler):
 
         if self.fields is None:
             # search over the fields defined on the current model
-            self.search_fields = local_search_fields
+            self.search_fields = {
+                full_name: field for field, full_name in local_search_fields
+            }
         else:
             # build a search_fields set from the passed definition,
             # which may involve traversing relations
@@ -307,37 +303,34 @@ class MySQLSearchQueryCompiler(BaseSearchQueryCompiler):
         return backend.config
 
     def get_search_fields_for_model(self):
-        return self.queryset.model.get_searchable_search_fields()
+        return self.queryset.model.get_searchable_search_fields_with_relatives()
 
-    def get_search_field(self, field_lookup, fields=None):
+    def get_search_field(self, full_name, fields=None, as_tuple=False):
+        """
+        Returns the SearchField (or AutocompleteField) for the given full_name.
+
+        :param full_name: the flattened field lookup, e.g., "authors__name"
+        :param fields: list of tuples (field_obj, full_name) from get_search_fields_for_model
+        :param as_tuple: if True, return (field_obj, full_lookup_name) tuple
+        """
         if fields is None:
-            fields = self.search_fields
+            fields = self.search_fields  # could be dict {full_name: field_obj}
 
-        if LOOKUP_SEP in field_lookup:
-            field_lookup, sub_field_name = field_lookup.split(LOOKUP_SEP, 1)
-        else:
-            sub_field_name = None
+        # Dict case
+        if isinstance(fields, dict):
+            field = fields.get(full_name)
+            if field is not None and as_tuple:
+                return field, full_name
+            return field
 
-        for field in fields:
-            if (
-                isinstance(field, self.TARGET_SEARCH_FIELD_TYPE)
-                and field.field_name == field_lookup
-            ):
-                return field
+        # List of tuples case
+        for field_obj, fname in fields:
+            if fname == full_name:
+                if as_tuple:
+                    return field_obj, fname
+                return field_obj
 
-            # Note: Searching on a specific related field using
-            # `.search(fields=…)` is not yet supported by Wagtail.
-            # This method anticipates by already implementing it.
-            # FIXME: this doesn't work because the list we're looping over comes from
-            # get_search_fields_for_model, which only returns `SearchField` records, not `RelatedFields`
-            if (
-                isinstance(field, RelatedFields)
-                and field.field_name == field_lookup
-                and sub_field_name is not None
-            ):
-                return self.get_search_field(
-                    sub_field_name, field.fields
-                )  # pragma: no cover
+        return None
 
     def build_search_query_content(self, query, invert=False):
         if isinstance(query, PlainText):

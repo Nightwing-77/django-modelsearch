@@ -176,9 +176,19 @@ class BackendTests:
             [r.title for r in results],
             ["JavaScript: The good parts", "JavaScript: The Definitive Guide"],
         )
-
-        # "JavaScript: The Definitive Guide" should be first
         self.assertEqual(results[0].title, "JavaScript: The Definitive Guide")
+
+    def test_ranking_reverse(self):
+        # Note: also tests the "or" operator
+        results = list(
+            self.backend.search("JavaScript good", models.Book, operator="or")
+        )
+        self.assertCountEqual(
+            [r.title for r in results],
+            ["JavaScript: The good parts", "JavaScript: The Definitive Guide"],
+        )
+
+        self.assertEqual(results[0].title, "JavaScript: The good parts")
 
     def test_annotate_score(self):
         results = self.backend.search("JavaScript", models.Book).annotate_score(
@@ -286,6 +296,17 @@ class BackendTests:
                 "The Fellowship of the Ring",
                 "The Two Towers",
                 "The Return of the King",
+            ],
+        )
+
+    def test_search_on_related_fields_reverse_one_to_one(self):
+        # "hobbit" is part of the search record for Bilbo Baggins via RelatedFields("novel_as_protagonist")
+        results = self.backend.search("hobbit", models.Character)
+
+        self.assertCountEqual(
+            [r.name for r in results],
+            [
+                "Bilbo Baggins",
             ],
         )
 
@@ -1489,9 +1510,7 @@ class TestBackendLoader(TestCase):
             db = get_search_backend(backend="default")
             self.assertIsInstance(db, DatabaseSearchBackend)
         else:
-            from modelsearch.backends.database.sqlite.sqlite import (
-                SQLiteSearchBackend,
-            )
+            from modelsearch.backends.database.sqlite.sqlite import SQLiteSearchBackend
 
             db = get_search_backend(backend="default")
             self.assertIsInstance(db, SQLiteSearchBackend)
@@ -1507,9 +1526,7 @@ class TestBackendLoader(TestCase):
             db = get_search_backend(backend="modelsearch.backends.database")
             self.assertIsInstance(db, DatabaseSearchBackend)
         else:
-            from modelsearch.backends.database.sqlite.sqlite import (
-                SQLiteSearchBackend,
-            )
+            from modelsearch.backends.database.sqlite.sqlite import SQLiteSearchBackend
 
             db = get_search_backend(backend="modelsearch.backends.database")
             self.assertIsInstance(db, SQLiteSearchBackend)
@@ -1527,9 +1544,7 @@ class TestBackendLoader(TestCase):
             )
             self.assertIsInstance(db, DatabaseSearchBackend)
         else:
-            from modelsearch.backends.database.sqlite.sqlite import (
-                SQLiteSearchBackend,
-            )
+            from modelsearch.backends.database.sqlite.sqlite import SQLiteSearchBackend
 
             db = get_search_backend(
                 backend="modelsearch.backends.database.SearchBackend"

@@ -4,15 +4,10 @@ import warnings
 from collections import OrderedDict
 from functools import reduce
 
+from django.contrib.postgres.aggregates import StringAgg
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
-from django.db import (
-    NotSupportedError,
-    connections,
-    router,
-    transaction,
-)
+from django.db import NotSupportedError, connections, router, transaction
 from django.db.models import Avg, Count, F, Manager, TextField, Value
-from django.db.models.constants import LOOKUP_SEP
 from django.db.models.functions import Cast, Length
 from django.db.models.sql.subqueries import InsertQuery
 from django.utils.encoding import force_str
@@ -22,12 +17,7 @@ from modelsearch.conf import get_app_config
 
 from ....index import AutocompleteField, RelatedFields, SearchField, get_indexed_models
 from ....query import And, Boost, MatchAll, Not, Or, Phrase, PlainText
-from ....utils import (
-    ADD,
-    MUL,
-    get_content_type_pk,
-    get_descendants_content_types_pks,
-)
+from ....utils import ADD, MUL, get_content_type_pk, get_descendants_content_types_pks
 from ...base import (
     BaseIndex,
     BaseSearchBackend,
@@ -336,7 +326,9 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
 
         if self.fields is None:
             # search over the fields defined on the current model
-            self.search_fields = local_search_fields
+            self.search_fields = {
+                full_name: field for field, full_name in local_search_fields
+            }
         else:
             # build a search_fields set from the passed definition,
             # which may involve traversing relations
@@ -351,37 +343,34 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
         return backend.config
 
     def get_search_fields_for_model(self):
-        return self.queryset.model.get_searchable_search_fields()
+        return self.queryset.model.get_searchable_search_fields_with_relatives()
 
-    def get_search_field(self, field_lookup, fields=None):
+    def get_search_field(self, full_name, fields=None, as_tuple=False):
+        """
+        Returns the SearchField (or AutocompleteField) for the given full_name.
+
+        :param full_name: the flattened field lookup, e.g., "authors__name"
+        :param fields: list of tuples (field_obj, full_name) from get_search_fields_for_model
+        :param as_tuple: if True, return (field_obj, full_lookup_name) tuple
+        """
         if fields is None:
-            fields = self.search_fields
+            fields = self.search_fields  # could be dict {full_name: field_obj}
 
-        if LOOKUP_SEP in field_lookup:
-            field_lookup, sub_field_name = field_lookup.split(LOOKUP_SEP, 1)
-        else:
-            sub_field_name = None
+        # Dict case
+        if isinstance(fields, dict):
+            field = fields.get(full_name)
+            if field is not None and as_tuple:
+                return field, full_name
+            return field
 
-        for field in fields:
-            if (
-                isinstance(field, self.TARGET_SEARCH_FIELD_TYPE)
-                and field.field_name == field_lookup
-            ):
-                return field
+        # List of tuples case
+        for field_obj, fname in fields:
+            if fname == full_name:
+                if as_tuple:
+                    return field_obj, fname
+                return field_obj
 
-            # Note: Searching on a specific related field using
-            # `.search(fields=…)` is not yet supported by Wagtail.
-            # This method anticipates by already implementing it.
-            # FIXME: this doesn't work because the list we're looping over comes from
-            # get_search_fields_for_model, which only returns `SearchField` records, not `RelatedFields`
-            if (
-                isinstance(field, RelatedFields)
-                and field.field_name == field_lookup
-                and sub_field_name is not None
-            ):
-                return self.get_search_field(
-                    sub_field_name, field.fields
-                )  # pragma: no cover
+        return None
 
     def build_tsquery_content(self, query, config=None, invert=False):
         if isinstance(query, PlainText):
@@ -458,7 +447,7 @@ class PostgresSearchQueryCompiler(BaseSearchQueryCompiler):
         return self.build_tsquery_content(query, config=config)
 
     def build_tsrank(self, vector, query, config=None, boost=1.0):
-        if isinstance(query, (Phrase, PlainText, Not)):
+        if isinstance(query, Phrase | PlainText | Not):
             rank_expression = SearchRank(
                 vector,
                 self.build_tsquery(query, config=config),
@@ -578,17 +567,40 @@ class PostgresAutocompleteQueryCompiler(PostgresSearchQueryCompiler):
         return [(F("index_entries__autocomplete"), 1.0)]
 
     def get_fields_vectors(self, search_query):
-        return [
-            (
-                SearchVector(
-                    field_lookup,
-                    config=search_query.config,
-                    weight="D",
-                ),
-                1.0,
+        vectors = []
+
+        for field_lookup, _search_field in self.search_fields.items():
+            # Get (field_obj, full_lookup_name) tuple safely
+            result = self.get_search_field(full_name=field_lookup, as_tuple=True)
+            if result is None:
+                continue  # skip missing fields
+
+            root_field_obj, full_name = result
+
+            # For autocomplete fields, there is usually no subfield
+            # We'll treat full_name as the vector source
+            vector_field = full_name
+
+            # Optionally annotate if you want to handle subfields (rare for autocomplete)
+            annotated_name = f"{root_field_obj.field_name}_{full_name}"
+            if annotated_name not in self.queryset.query.annotations:
+                self.queryset = self.queryset.annotate(
+                    **{annotated_name: StringAgg(full_name, delimiter=" ")}
+                )
+                vector_field = annotated_name
+
+            vectors.append(
+                (
+                    SearchVector(
+                        vector_field,
+                        config=search_query.config,
+                        weight="D",
+                    ),
+                    getattr(root_field_obj, "boost", 1.0),
+                )
             )
-            for field_lookup, search_field in self.search_fields.items()
-        ]
+
+        return vectors
 
 
 class PostgresSearchResults(BaseSearchResults):
